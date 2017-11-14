@@ -1,0 +1,1 @@
+/usr/bin/c++   -O3 -DNDEBUG  -fprofile-generate CMakeFiles/test_c_profiled.dir/test/test_c.c.o  -o test_c_profiled -rdynamic libRaptorQ_Static_Profiling.a -lstdc++ -lm -lpthread 

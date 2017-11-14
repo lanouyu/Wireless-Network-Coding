@@ -1,0 +1,1 @@
+/usr/bin/cc  -O3 -DNDEBUG   CMakeFiles/test_c.dir/test/test_c.c.o  -o test_c -rdynamic -lstdc++ lib/libRaptorQ.so.0.1.10 -lm -lpthread -Wl,-rpath,/home/blue/Downloads/libRaptorQ-0.1.X/build/lib 

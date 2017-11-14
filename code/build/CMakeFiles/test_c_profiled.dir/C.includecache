@@ -1,0 +1,42 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/blue/Downloads/libRaptorQ-0.1.X/src/cRaptorQ.h
+common.hpp
+/home/blue/Downloads/libRaptorQ-0.1.X/src/common.hpp
+stdbool.h
+-
+stddef.h
+-
+stdint.h
+-
+
+/home/blue/Downloads/libRaptorQ-0.1.X/src/common.hpp
+cassert
+-
+cstdint
+-
+iterator
+-
+
+/home/blue/Downloads/libRaptorQ-0.1.X/test/test_c.c
+../src/cRaptorQ.h
+/home/blue/Downloads/libRaptorQ-0.1.X/src/cRaptorQ.h
+stdbool.h
+-
+stdint.h
+-
+stdio.h
+-
+stdlib.h
+-
+time.h
+-
+math.h
+-
+

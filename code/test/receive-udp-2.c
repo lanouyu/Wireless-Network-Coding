@@ -1,0 +1,339 @@
+#include "../src/cRaptorQ.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <time.h>
+#include <math.h>
+#include <pthread.h>
+#include <unistd.h>
+/******* for libpcap *******/
+#include <pcap.h>  
+#include <time.h>    
+#include <stdio.h>  
+#include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netinet/if_ether.h>
+#include <linux/ip.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
+
+#define PORT 6666
+#define MAXLINE 4096
+#define MAXSYMBOL 100
+
+/***********************callback function get packet**********************/
+void my_callback(u_char *userless, const struct pcap_pkthdr *pkthdr, 
+                    const u_char *packet)
+{
+    //char * buff = userless;
+    u_char *data;
+
+    u_int L = (pkthdr->len - sizeof(struct ether_header) - sizeof(struct iphdr)- sizeof(struct udphdr))/2;
+    data = (u_char*)(packet+L+sizeof(struct ether_header)+sizeof(struct iphdr)
+                                    +sizeof(struct udphdr));
+    //printf ("the content of packets is \n%x\n",data);
+    printf("l:%x\npkthdr->len:%x\n",L, pkthdr->len );
+
+    for (int i = 0; i < L; ++i)
+    {
+      userless[i] = data[i];
+      //printf("%02x\n", userless[i]);
+    }
+}
+  
+void getPacket(u_char * arg, const struct pcap_pkthdr * pkthdr, const u_char * packet)  
+{  
+  int * id = (int *)arg;  
+    
+  printf("id: %d\n", ++(*id));  
+  printf("Packet length: %d\n", pkthdr->len);  
+  printf("Number of bytes: %d\n", pkthdr->caplen);  
+  printf("Recieved time: %s", ctime((const time_t *)&pkthdr->ts.tv_sec));   
+    
+  int i;
+  u_int L = pkthdr->len - sizeof(struct ether_header) - sizeof(struct iphdr)- sizeof(struct udphdr);  
+  for(i=0; i<L; ++i)  
+  {  
+    printf(" %02x", packet[i]);  
+    if( (i + 1) % 16 == 0 )  
+    {  
+      printf("\n");  
+    }  
+  }  
+    
+  printf("\n\n");  
+}  
+
+uint64_t decode(uint32_t mysize, u_char *buff) {
+	/*******************receive****************************/
+	const uint16_t subsymbol = 8;
+	const uint16_t symbol_size = 16;
+	float drop_prob = 20.0;
+	uint8_t overhead = 4;
+	struct pair
+	{
+		uint32_t id;
+		uint32_t *symbol;
+	};
+	struct pair *encoded;
+	uint32_t next_encoded = 0;
+	uint32_t oti_scheme = 0;
+	uint64_t oti_common = 0;
+
+	//n = recv(connfd, &oti_common, sizeof(oti_common), 0);
+	//buff[n] = '\0';
+	uint32_t a = 0;
+	memcpy(&oti_common, buff, sizeof(oti_common));
+	printf("recv oti_common from client: %x\n", oti_common);
+
+	//recv(connfd, &oti_scheme, sizeof(oti_scheme), 0);
+	//n = recv(connfd, &oti_scheme, sizeof(oti_scheme), 0);
+	//buff[n] = '\0';
+	memcpy(&oti_scheme, buff+sizeof(oti_common), sizeof(oti_scheme));
+	printf("recv oti_scheme from client: %x\n", oti_scheme);
+
+	a = sizeof(oti_scheme) + sizeof(oti_common);
+
+	encoded = (struct pair*) malloc(sizeof(struct pair)* MAXSYMBOL);
+	for (uint32_t i = 0; i < MAXSYMBOL; ++i)
+		encoded[i].symbol = NULL;
+
+	//n = recv(connfd, buff, sizeof(uint32_t)+symbol_size, 0);
+	while (!(buff[a] == 'E' && buff[a+1]== 'N' && buff[a+2]=='D')) {
+		memcpy(&encoded[next_encoded].id, buff + a, sizeof(uint32_t));
+		a = a + sizeof(uint32_t);
+		encoded[next_encoded].symbol = (uint32_t*) malloc(symbol_size);
+		memcpy(encoded[next_encoded].symbol, buff + a, 
+				symbol_size);
+		a = a + symbol_size;
+		printf("recv encoded[%x]:\tid: %x;\tsymbol: %x\n", next_encoded, 
+		encoded[next_encoded].id, *encoded[next_encoded].symbol);
+		
+		++next_encoded;
+		//n = recv(connfd, buff, sizeof(uint32_t)+symbol_size, 0);
+	}
+
+	printf("receive all data!\n");
+
+	/******************decode******************************/
+	struct RaptorQ_ptr *dec = RaptorQ_Dec(DEC_32, oti_common, oti_scheme);
+	if (dec == NULL) {
+		fprintf(stderr, "Could not initialize decoder!\n");
+		for (uint32_t k = 0; k < next_encoded; ++k)
+			free (encoded[k].symbol);
+		free (encoded);
+		return 0;
+	}
+
+	for (size_t i = 0; i < next_encoded; ++i) {
+		uint32_t *data = encoded[i].symbol;
+		uint32_t data_size = RaptorQ_symbol_size (dec) / sizeof(uint32_t);
+		printf("encoded[%x]=%x\tdata_size: %x\n", i,*data, data_size);
+		if (!RaptorQ_add_symbol_id (dec, (void **)&data, data_size,
+									encoded[i].id)) {
+			fprintf(stderr, "Error: couldn't add the symbol to the decoder\n");
+			for (uint32_t k = 0; k < next_encoded; ++k)
+				free (encoded[k].symbol);
+			free (encoded);
+			RaptorQ_free (&dec);
+			return 0;
+		}
+	}
+
+	uint64_t decoded_size = ceil (RaptorQ_bytes (dec) / sizeof(uint32_t));
+	uint32_t *received = (uint32_t *) malloc (decoded_size * sizeof(uint32_t));
+
+	for (uint32_t *shit = received; shit != received + decoded_size; ++ shit);
+	uint32_t *rec = received;
+	uint64_t written = RaptorQ_decode (dec, (void **)&rec, decoded_size);
+	
+	printf("written: %x\ndecoded_size: %x\nmysize: %x\n",
+		written, decoded_size, mysize);
+	
+	if (written != decoded_size) {
+		fprintf(stderr, "Couldn't decode: %i - %lu\n", mysize, written);
+		free(received);
+		for (uint32_t k = 0; k < next_encoded; ++k)
+			free (encoded[k].symbol);
+		free (encoded);
+		RaptorQ_free(&dec);
+		return 0;
+	} else {
+		printf("Decoded: %i\n", decoded_size);
+	}
+	/*
+	for (uint16_t i = 0; i < mysize; ++i) {
+		printf("received[%x]: %x\n", i, received[i]);
+	}
+	*/
+	RaptorQ_free(&dec);
+	for (uint32_t k = 0; k < next_encoded; ++k)
+		free (encoded[k].symbol);
+	free (encoded);
+	return decoded_size * 4;
+}
+
+//======================================================================================
+int udp_1(int i) {
+	FILE * fp;
+
+  fp = fopen("log_double_1_mysize50_all.txt","wb");
+	/********************** socket****************************/
+  	char errBuf[PCAP_ERRBUF_SIZE], * devStr;
+  	//u_char buff[MAXLINE];  
+    
+  	/* get a device */  
+  	//devStr = pcap_lookupdev(errBuf);  
+  	devStr = "ens33";
+    
+  	if(devStr)  
+  	{  
+    	printf("success: device: %s\n", devStr);  
+  	}  
+  	else  
+  	{  
+    	printf("error: %s\n", errBuf);  
+    	exit(1);  
+  	}  
+    
+  	/* open a device, wait until a packet arrives */  
+  	pcap_t * device = pcap_open_live(devStr, 65535, 1, 0, errBuf);  
+    
+  	if(!device)  
+  	{  
+    	printf("error: pcap_open_live(): %s\n", errBuf);  
+    	exit(1);  
+  	}
+
+  	/* construct a filter */
+  	struct bpf_program filter; 
+  	//pcap_compile(device, &filter, "udp", 1, 0); 
+  	pcap_compile(device, &filter, "src host 192.168.1.112", 1, 0); 
+  	//pcap_compile(device, &filter, "src host 192.168.211.128", 1, 0);
+  	pcap_setfilter(device, &filter);
+  	clock_t begin, end;
+  	double duration;
+  	uint64_t decoded_size = 0;
+  	u_char buff[MAXLINE];
+
+  	for (int i = 0; i < 500; ++i) {
+  	//while (1) {
+  		begin = clock();
+  		decoded_size = 0;  
+  		pcap_loop(device, 1, my_callback, (u_char *)buff);
+  		printf("receive %s\n", (u_char *)buff);
+      //begin = clock();
+  		decoded_size = decode(50, (u_char *)buff);
+  		end = clock();
+  		duration=(double)(end - begin) / CLOCKS_PER_SEC;
+  		printf("i:%d, %.0f KB/s\n",i,decoded_size / duration / 1000);
+  		fprintf(fp, "%.0f \n",decoded_size / duration / 1000);
+  	}
+
+  	pcap_close(device); 
+  	fclose(fp);
+
+  	return 0;
+}
+
+int udp_2(int i) {
+	FILE * fp;
+  
+  fp = fopen("log_double_2_mysize50_all.txt","wb");
+	/********************** socket****************************/
+  	char errBuf[PCAP_ERRBUF_SIZE], * devStr;
+  	//u_char buff[MAXLINE];  
+    
+  	/* get a device */  
+  	//devStr = pcap_lookupdev(errBuf);  
+  	devStr = "ens38";
+    
+  	if(devStr)  
+  	{  
+    	printf("success: device: %s\n", devStr);  
+  	}  
+  	else  
+  	{  
+    	printf("error: %s\n", errBuf);  
+    	exit(1);  
+  	}  
+    
+  	/* open a device, wait until a packet arrives */  
+  	pcap_t * device = pcap_open_live(devStr, 65535, 1, 0, errBuf);  
+    
+  	if(!device)  
+  	{  
+    	printf("error: pcap_open_live(): %s\n", errBuf);  
+    	exit(1);  
+  	}
+
+  	/* construct a filter */
+  	struct bpf_program filter; 
+  	//pcap_compile(device, &filter, "udp", 1, 0); 
+  	pcap_compile(device, &filter, "src host 192.168.0.134", 1, 0); 
+  	//pcap_compile(device, &filter, "src host 192.168.211.128", 1, 0);
+  	pcap_setfilter(device, &filter);
+  	clock_t begin, end;
+  	double duration;
+  	uint64_t decoded_size = 0;
+  	u_char buff[MAXLINE];
+
+  	for (int i = 0; i < 500; ++i) {
+  	//while (1) {
+  		begin = clock();
+  		decoded_size = 0;  
+  		pcap_loop(device, 1, my_callback, (u_char *)buff);
+  		printf("receive %s\n", (u_char *)buff);
+      //begin = clock();
+  		decoded_size = decode(50, (u_char *)buff);
+  		end = clock();
+  		duration=(double)(end - begin) / CLOCKS_PER_SEC;
+  		printf("i%d, %.0f KB/s\n",i,decoded_size / duration / 1000);
+  		fprintf(fp, "%.0f \n",decoded_size / duration / 1000);
+  	}
+
+  	pcap_close(device); 
+  	fclose(fp);
+
+  	return 0;
+}
+
+//======================================================================================
+int main(int argc, char** argv) {
+  int i = 60;
+  pthread_t tid1,tid2;
+  int err;
+  void *tret;
+  err=pthread_create(&tid1,NULL,udp_1,i);//创建线程
+  if(err!=0)
+  {
+    printf("pthread_create error:%s\n",strerror(err));
+    exit(-1);
+  }
+  err=pthread_create(&tid2,NULL,udp_2,i);
+  if(err!=0)
+  {
+    printf("pthread_create error:%s\n",strerror(err));
+     exit(-1);
+  }
+  err=pthread_join(tid1,&tret);//阻塞等待线程id为tid1的线程，直到该线程退出
+  if(err!=0)
+  {
+    printf("can not join with thread1:%s\n",strerror(err));
+    exit(-1);
+  }
+  printf("thread 1 exit code %d\n\n",(int)tret);
+  err=pthread_join(tid2,&tret);
+  if(err!=0)
+  {
+    printf("can not join with thread1:%s\n",strerror(err));
+    exit(-1);
+  }
+  printf("thread 2 exit code %d\n\n",(int)tret);
+
+  return 0;
+}

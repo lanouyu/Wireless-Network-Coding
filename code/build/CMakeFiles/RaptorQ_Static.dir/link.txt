@@ -1,0 +1,2 @@
+/usr/bin/gcc-ar qc lib/libRaptorQ.0.a  CMakeFiles/RaptorQ_Static.dir/src/Precode_Matrix_solver.cpp.o CMakeFiles/RaptorQ_Static.dir/src/Precode_Matrix.cpp.o CMakeFiles/RaptorQ_Static.dir/src/Rand.cpp.o CMakeFiles/RaptorQ_Static.dir/src/Parameters.cpp.o CMakeFiles/RaptorQ_Static.dir/src/Graph.cpp.o CMakeFiles/RaptorQ_Static.dir/src/cRaptorQ.cpp.o
+/usr/bin/gcc-ranlib lib/libRaptorQ.0.a
